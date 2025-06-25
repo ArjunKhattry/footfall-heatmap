@@ -5,13 +5,31 @@ import os
 from datetime import datetime
 import json
 
+# --- Load Configuration ---
+CONFIG_PATH = "alert_config.json"
+if not os.path.exists(CONFIG_PATH):
+    default_config = {
+        "alert_threshold": 1,
+        "alert_zones": {
+            "0": [[100, 100], [300, 300]],
+            "1": [[200, 150], [400, 350]]
+        }
+    }
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(default_config, f, indent=4)
+
+with open(CONFIG_PATH, "r") as f:
+    config = json.load(f)
+
+ALERT_THRESHOLD = config["alert_threshold"]
+alert_zones = {int(k): v for k, v in config["alert_zones"].items()}
+
 # --- Configurable Thresholds ---
 HEAT_INCREMENT = 1
 FIXED_SIZE = (640, 480)
 CONFIDENCE_THRESHOLD = 0.4
 DUPLICATE_DISTANCE_THRESHOLD = 80
 MIN_MOVEMENT_THRESHOLD = 5
-ALERT_THRESHOLD = 1
 
 # Load YOLOv8 model
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "yolov8n.pt")
@@ -77,38 +95,6 @@ def deduplicate_points(points, threshold):
         if all(np.hypot(pt[0]-u[0], pt[1]-u[1]) > threshold for u in unique):
             unique.append(pt)
     return unique
-
-# --- Manual Alert Zone Drawing ---
-alert_zones = {}
-selected_zone = []
-mouse_position = (0, 0)
-
-def draw_zone(event, x, y, flags, param):
-    global selected_zone, alert_zones, mouse_position
-    cam_id = param
-    mouse_position = (x, y)
-    if event == cv2.EVENT_LBUTTONDOWN:
-        selected_zone.append((x, y))
-        if len(selected_zone) == 2:
-            alert_zones[cam_id] = selected_zone.copy()
-            print(f"📌 Alert zone set for Camera {cam_id}: {selected_zone}")
-            selected_zone.clear()
-
-for i, cam in enumerate(cams):
-    ret, frame = cam.read()
-    frame = cv2.resize(frame, FIXED_SIZE)
-    while True:
-        temp = frame.copy()
-        if len(selected_zone) == 1:
-            cv2.rectangle(temp, selected_zone[0], mouse_position, (0, 255, 255), 2)
-        elif i in alert_zones:
-            cv2.rectangle(temp, alert_zones[i][0], alert_zones[i][1], (0, 0, 255), 2)
-        cv2.imshow(f"Mark Alert Zone - Camera {i}", temp)
-        cv2.setMouseCallback(f"Mark Alert Zone - Camera {i}", draw_zone, i)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('d') and i in alert_zones:
-            cv2.destroyWindow(f"Mark Alert Zone - Camera {i}")
-            break
 
 # --- Frame Processing ---
 def process_frame(frame, offset_x, cam_index):
@@ -201,7 +187,8 @@ while True:
     cv2.putText(overlay, f"Live Person Count: {total_detected}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
 
     if total_zone_count > ALERT_THRESHOLD:
-        cv2.putText(overlay, "⚠️ ALERT: Overcrowding!", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+        cv2.putText(overlay, "ALERT: Overcrowding!", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
+    
         print("🚨 ALERT: People exceeded limit in marked zone!")
 
     if total_detected != previous_logged_count:
