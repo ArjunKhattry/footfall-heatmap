@@ -6,12 +6,12 @@ from datetime import datetime
 import json
 
 # --- Configurable Thresholds ---
-HEAT_INCREMENT = 15
+HEAT_INCREMENT = 1
 FIXED_SIZE = (640, 480)
-CONFIDENCE_THRESHOLD = 0.4  # Lowered for more sensitivity
+CONFIDENCE_THRESHOLD = 0.4
 DUPLICATE_DISTANCE_THRESHOLD = 80
-MIN_MOVEMENT_THRESHOLD = 45
-ALERT_THRESHOLD = 1  # Max allowed in alert zone
+MIN_MOVEMENT_THRESHOLD = 5
+ALERT_THRESHOLD = 1
 
 # Load YOLOv8 model
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "yolov8n.pt")
@@ -43,6 +43,7 @@ h, w = combined_background.shape[:2]
 
 heatmap = np.zeros((h, w), dtype=np.float32)
 persistent_heatmap = np.zeros_like(heatmap)
+position_duration = {}  # Tracks time a person stays at a location
 last_positions = {}
 frame_person_count = 0
 previous_logged_count = -1
@@ -128,22 +129,32 @@ def process_frame(frame, offset_x, cam_index):
 
             cx = (x1 + x2) // 2 + offset_x
             cy = y2
-
             cy = min(max(cy, 0), persistent_heatmap.shape[0] - 1)
             cx = min(max(cx, 0), persistent_heatmap.shape[1] - 1)
 
-            prev_pos = last_positions.get((cam_index, idx))
-            movement_distance = round(np.hypot(cx - prev_pos[0], cy - prev_pos[1]), 2) if prev_pos else 0
+            key = (cam_index, idx)
+            prev_pos = last_positions.get(key)
 
-            if prev_pos is None or movement_distance >= MIN_MOVEMENT_THRESHOLD:
-                persistent_heatmap[cy, cx] += HEAT_INCREMENT
-                last_positions[(cam_index, idx)] = (cx, cy)
-                append_json(blob_json_path, {
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "camera_id": cam_index,
-                    "x": cx,
-                    "y": cy
-                })
+            if prev_pos:
+                dist = np.hypot(cx - prev_pos[0], cy - prev_pos[1])
+            else:
+                dist = float('inf')
+
+            if prev_pos is None or dist >= MIN_MOVEMENT_THRESHOLD:
+                position_duration[key] = 1
+            else:
+                position_duration[key] = position_duration.get(key, 0) + 1
+
+            last_positions[key] = (cx, cy)
+            intensity = HEAT_INCREMENT * position_duration[key]
+            persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + intensity, 255)
+
+            append_json(blob_json_path, {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "camera_id": cam_index,
+                "x": cx,
+                "y": cy
+            })
 
             if zone:
                 (xA, yA), (xB, yB) = zone
@@ -182,7 +193,6 @@ while True:
     total_detected = len(unique_detections)
 
     combined = np.hstack(frames)
-    # DO NOT reset persistent_heatmap — blobs stay permanently
     blurred = cv2.GaussianBlur(persistent_heatmap.copy(), (51, 51), 0)
     norm = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
     color = cv2.applyColorMap(norm.astype(np.uint8), cv2.COLORMAP_JET)
