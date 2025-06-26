@@ -11,8 +11,8 @@ if not os.path.exists(CONFIG_PATH):
     default_config = {
         "alert_threshold": 1,
         "alert_zones": {
-            "0": [[100, 100], [300, 300]],
-            "1": [[200, 150], [400, 350]]
+            "0": [[300, 140], [280, 260]],
+            "1": [[240, 180], [360, 300]]
         }
     }
     with open(CONFIG_PATH, "w") as f:
@@ -25,19 +25,35 @@ ALERT_THRESHOLD = config["alert_threshold"]
 alert_zones = {int(k): v for k, v in config["alert_zones"].items()}
 
 # --- Configurable Thresholds ---
-HEAT_INCREMENT = 1
+HEAT_INCREMENT = 25
 FIXED_SIZE = (640, 480)
 CONFIDENCE_THRESHOLD = 0.4
 DUPLICATE_DISTANCE_THRESHOLD = 80
-MIN_MOVEMENT_THRESHOLD = 5
+MIN_MOVEMENT_THRESHOLD = 45
 
 # Load YOLOv8 model
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "yolov8n.pt")
 model = YOLO(MODEL_PATH)
 
+# Load predefined background images for each camera
+bg_image_paths = ["/home/cbginnovation/Desktop/cam1.jpg", "/home/cbginnovation/Desktop/cam0.png"]
+background_images = []
+frame_widths = []
+
+for i, path in enumerate(bg_image_paths):
+    if not os.path.exists(path):
+        print(f"Error: Background image not found at {path}")
+        exit(1)
+    bg = cv2.imread(path)
+    bg = cv2.resize(bg, FIXED_SIZE)
+    background_images.append(bg.copy())
+    frame_widths.append(bg.shape[1])
+
+combined_background = np.hstack(background_images)
+h, w = combined_background.shape[:2]
+
 # Initialize cameras
 cams = [cv2.VideoCapture(0), cv2.VideoCapture(2)]
-
 for i, cam in enumerate(cams):
     if not cam.isOpened():
         print(f"Error: Camera {i} not opened.")
@@ -45,23 +61,9 @@ for i, cam in enumerate(cams):
     else:
         print(f"✅ Camera {i} opened.")
 
-background_images = []
-frame_widths = []
-for i, cam in enumerate(cams):
-    ret, frame = cam.read()
-    if not ret:
-        print(f"Error: Cannot read from Camera {i}.")
-        exit(1)
-    frame = cv2.resize(frame, FIXED_SIZE)
-    background_images.append(frame.copy())
-    frame_widths.append(frame.shape[1])
-
-combined_background = np.hstack(background_images)
-h, w = combined_background.shape[:2]
-
 heatmap = np.zeros((h, w), dtype=np.float32)
 persistent_heatmap = np.zeros_like(heatmap)
-position_duration = {}  # Tracks time a person stays at a location
+position_duration = {}
 last_positions = {}
 frame_person_count = 0
 previous_logged_count = -1
@@ -188,7 +190,6 @@ while True:
 
     if total_zone_count > ALERT_THRESHOLD:
         cv2.putText(overlay, "ALERT: Overcrowding!", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
-    
         print("🚨 ALERT: People exceeded limit in marked zone!")
 
     if total_detected != previous_logged_count:
@@ -204,6 +205,7 @@ while True:
 
 cv2.destroyAllWindows()
 
+# --- Final Output Generation ---
 blurred_final = cv2.GaussianBlur(persistent_heatmap.copy(), (51, 51), 0)
 normalized_final = cv2.normalize(blurred_final, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 color_map_final = cv2.applyColorMap(normalized_final, cv2.COLORMAP_JET)
