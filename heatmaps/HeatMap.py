@@ -25,7 +25,7 @@ ALERT_THRESHOLD = config["alert_threshold"]
 alert_zones = {int(k): v for k, v in config["alert_zones"].items()}
 
 # --- Configurable Thresholds ---
-HEAT_INCREMENT = 25
+HEAT_INCREMENT = 20
 FIXED_SIZE = (640, 480)
 CONFIDENCE_THRESHOLD = 0.4
 DUPLICATE_DISTANCE_THRESHOLD = 80
@@ -36,7 +36,7 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), "yolov8n.pt")
 model = YOLO(MODEL_PATH)
 
 # Load predefined background images for each camera
-bg_image_paths = ["/home/cbginnovation/Desktop/cam1.jpg", "/home/cbginnovation/Desktop/cam0.png"]
+bg_image_paths = ["/home/cbginnovation/Desktop/cam0.png","/home/cbginnovation/Desktop/cam1.jpg"]
 background_images = []
 frame_widths = []
 
