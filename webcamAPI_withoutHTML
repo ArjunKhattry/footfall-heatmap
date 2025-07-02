@@ -1,0 +1,147 @@
+from flask import Flask, jsonify, send_file, request
+from threading import Thread
+import os
+import json
+import HeatMap
+import base64
+import cv2
+import numpy as np
+from datetime import datetime
+
+app = Flask(__name__)
+detection_running = False
+
+@app.route('/')
+def home():
+    return "✅ API is running. Use /start to begin detection, /heatmap to get image, /person_count for live count, /cumulative_count for total, /alert_status for alert, /heatmap_report to generate filtered report."
+
+@app.route('/start', methods=['GET'])
+def start_detection():
+    global detection_running
+    if detection_running:
+        return jsonify({"status": "already running"})
+
+    detection_running = True
+    t = Thread(target=HeatMap.run_heatmap_detection)
+    t.daemon = True
+    t.start()
+    return jsonify({"status": "started", "message": "Heatmap detection is running in background."})
+
+@app.route('/heatmap', methods=['GET'])
+def get_heatmap():
+    heatmap_dir = "heatmaps"
+    if not os.path.exists(heatmap_dir):
+        return jsonify({"error": "Heatmap directory not found"}), 404
+
+    files = [f for f in os.listdir(heatmap_dir) if f.startswith("final_heatmap_on_background") and f.endswith(".png")]
+    if not files:
+        return jsonify({"error": "No heatmap image available yet"}), 404
+
+    latest_file = max(files, key=lambda x: os.path.getctime(os.path.join(heatmap_dir, x)))
+    with open(os.path.join(heatmap_dir, latest_file), "rb") as img_file:
+        encoded_string = base64.b64encode(img_file.read()).decode('utf-8')
+
+    return jsonify({"heatmap_base64": encoded_string})
+
+@app.route('/person_count', methods=['GET'])
+def get_person_count():
+    filepath = "heatmaps/person_count_log.json"
+    if not os.path.exists(filepath):
+        return jsonify({"error": "person_count_log.json not found"}), 404
+
+    try:
+        with open(filepath, "r") as f:
+            data = json.load(f)
+        if not data:
+            return jsonify({"error": "Log file is empty"}), 404
+        latest_entry = data[-1]
+        return jsonify(latest_entry)
+    except Exception as e:
+        return jsonify({"error": f"Failed to read log: {str(e)}"}), 500
+
+@app.route('/cumulative_count', methods=['GET'])
+def get_cumulative_count():
+    filepath = "heatmaps/person_count_log.json"
+    if not os.path.exists(filepath):
+        return jsonify({"error": "person_count_log.json not found"}), 404
+
+    try:
+        with open(filepath, "r") as f:
+            data = json.load(f)
+
+        max_count = 0
+        for entry in data:
+            count = entry.get("person_count", 0)
+            if count > max_count:
+                max_count = count
+
+        return jsonify({
+            "cumulative_person_count": max_count,
+            "entries_considered": len(data)
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to compute cumulative count: {str(e)}"}), 500
+
+@app.route('/alert_status', methods=['GET'])
+def get_alert_status():
+    try:
+        status = HeatMap.alert_triggered
+        return jsonify({"alert": status})
+    except AttributeError:
+        return jsonify({"error": "Alert status not available"}), 500
+
+# ✅ NEW: Heatmap Report API
+@app.route('/heatmap_report', methods=['GET'])
+def heatmap_report():
+    start_time_str = request.args.get("start")
+    end_time_str = request.args.get("end")
+
+    if not start_time_str or not end_time_str:
+        return jsonify({"error": "Provide start and end timestamps in format YYYY-MM-DD HH:MM:SS"}), 400
+
+    try:
+        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+        end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return jsonify({"error": "Incorrect time format. Use YYYY-MM-DD HH:MM:SS"}), 400
+
+    # Paths
+    blob_path = "heatmaps/blob_coordinates.json"
+    bg_path = "/home/cbginnovation/Desktop/cam0.png"
+    out_path = "heatmaps/heatmap_report_time_filtered.png"
+
+    if not os.path.exists(blob_path) or not os.path.exists(bg_path):
+        return jsonify({"error": "Required files not found"}), 500
+
+    # Load and prepare
+    with open(blob_path, "r") as f:
+        data = json.load(f)
+
+    bg = cv2.imread(bg_path)
+    bg = cv2.resize(bg, (640, 480))
+    h, w = bg.shape[:2]
+    heatmap = np.zeros((h, w), dtype=np.float32)
+
+    # Accumulate heat
+    for item in data:
+        try:
+            t = datetime.strptime(item["timestamp"], "%Y-%m-%d %H:%M:%S")
+            if start_time <= t <= end_time:
+                x, y = int(item["x"]), int(item["y"])
+                if 0 <= x < w and 0 <= y < h:
+                    heatmap[y, x] += 50
+        except:
+            continue
+
+    blurred = cv2.GaussianBlur(heatmap, (51, 51), 0)
+    normalized = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
+    color_map = cv2.applyColorMap(normalized.astype(np.uint8), cv2.COLORMAP_JET)
+    overlay = cv2.addWeighted(bg, 0.6, color_map, 0.4, 0)
+
+    # Save
+    cv2.imwrite(out_path, overlay)
+    return send_file(out_path, mimetype='image/png')
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
