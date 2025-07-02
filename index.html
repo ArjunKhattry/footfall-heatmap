@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Footfall Heatmap Dashboard</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f7f7f7;
+      padding: 20px;
+    }
+    h1 {
+      color: #333;
+    }
+    .card {
+      background: white;
+      padding: 15px;
+      margin: 15px 0;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      border-radius: 8px;
+    }
+    button {
+      background-color: #007BFF;
+      color: white;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    input[type="datetime-local"] {
+      padding: 5px;
+    }
+    img {
+      max-width: 100%;
+      border-radius: 10px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>📊 Footfall Heatmap Dashboard</h1>
+
+  <div class="card">
+    <h2>⏱ Start Heatmap Detection</h2>
+    <button onclick="startDetection()">Start Detection</button>
+    <p id="startStatus"></p>
+  </div>
+
+  <div class="card">
+    <h2>👥 Live Person Count</h2>
+    <button onclick="fetchPersonCount()">Get Live Count</button>
+    <p id="personCount"></p>
+  </div>
+
+  <div class="card">
+    <h2>📊 Cumulative Person Count</h2>
+    <button onclick="fetchCumulativeCount()">Get Cumulative Count</button>
+    <p id="cumulativeCount"></p>
+  </div>
+
+  <div class="card">
+    <h2>⚠ Alert Status</h2>
+    <button onclick="fetchAlertStatus()">Check Alert</button>
+    <p id="alertStatus"></p>
+  </div>
+
+  <div class="card">
+    <h2>🖼 View Current Heatmap</h2>
+    <button onclick="fetchHeatmap()">Get Heatmap</button>
+    <br />
+    <img id="heatmapImg" />
+  </div>
+
+  <div class="card">
+    <h2>📆 Heatmap Report by Time</h2>
+    <label>Start Time:</label>
+    <input type="datetime-local" id="startTime" />
+    <br /><br />
+    <label>End Time:</label>
+    <input type="datetime-local" id="endTime" />
+    <br /><br />
+    <button onclick="fetchHeatmapReport()">Generate Report</button>
+    <br />
+    <img id="reportImg" />
+  </div>
+
+  <script>
+    function startDetection() {
+      fetch("/start")
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById("startStatus").innerText = data.message || data.status;
+        });
+    }
+
+    function fetchPersonCount() {
+      fetch("/person_count")
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById("personCount").innerText = `⏱ ${data.timestamp || 'N/A'} - Count: ${data.person_count || 0}`;
+        });
+    }
+
+    function fetchCumulativeCount() {
+      fetch("/cumulative_count")
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById("cumulativeCount").innerText = `Total: ${data.cumulative_person_count || 0}, Entries: ${data.entries_considered || 0}`;
+        });
+    }
+
+    function fetchAlertStatus() {
+      fetch("/alert_status")
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById("alertStatus").innerText = data.alert ? "🚨 ALERT Triggered!" : "✅ No Alert";
+        });
+    }
+
+    function fetchHeatmap() {
+      fetch("/heatmap")
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById("heatmapImg").src = `data:image/png;base64,${data.heatmap_base64}`;
+        });
+    }
+
+    function fetchHeatmapReport() {
+      const start = document.getElementById("startTime").value.replace("T", " ");
+      const end = document.getElementById("endTime").value.replace("T", " ");
+      fetch(`/heatmap_report?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.heatmap_base64) {
+            document.getElementById("reportImg").src = `data:image/png;base64,${data.heatmap_base64}`;
+          } else {
+            alert("No heatmap generated. Check the time range.");
+          }
+        });
+    }
+  </script>
+</body>
+</html>
