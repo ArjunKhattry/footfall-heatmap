@@ -1,147 +1,160 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Footfall Heatmap Dashboard</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      background-color: #f7f7f7;
-      padding: 20px;
+      padding: 30px;
+      background-color: #f0f0f0;
     }
-    h1 {
+
+    h1, h2 {
       color: #333;
     }
-    .card {
-      background: white;
-      padding: 15px;
-      margin: 15px 0;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-      border-radius: 8px;
-    }
-    button {
-      background-color: #007BFF;
+
+    .btn {
+      padding: 10px 20px;
+      margin: 10px 5px;
+      background-color: #3498db;
       color: white;
-      padding: 8px 12px;
       border: none;
-      border-radius: 4px;
+      border-radius: 5px;
       cursor: pointer;
     }
-    button:hover {
-      background-color: #0056b3;
+
+    .btn:hover {
+      background-color: #2980b9;
     }
-    input[type="datetime-local"] {
-      padding: 5px;
-    }
-    img {
-      max-width: 100%;
-      border-radius: 10px;
+
+    .stats {
+      font-size: 18px;
       margin-top: 10px;
+    }
+
+    img {
+      margin-top: 20px;
+      border: 2px solid #ccc;
+    }
+
+    .live-stream {
+      width: 480px;
+      height: auto;
+    }
+
+    .section {
+      margin-bottom: 50px;
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0px 2px 5px rgba(0,0,0,0.1);
+    }
+
+    .alert {
+      color: red;
+      font-weight: bold;
+    }
+
+    .normal {
+      color: green;
+      font-weight: bold;
     }
   </style>
 </head>
 <body>
-  <h1>📊 Footfall Heatmap Dashboard</h1>
 
-  <div class="card">
-    <h2>⏱ Start Heatmap Detection</h2>
-    <button onclick="startDetection()">Start Detection</button>
-    <p id="startStatus"></p>
+  <h1>👣 Footfall Heatmap Dashboard</h1>
+
+  <div class="section">
+    <h2>Live Monitoring</h2>
+    <button class="btn" onclick="startDetection()">▶️ Start Detection</button>
+    <button class="btn" onclick="loadHeatmap()">🖼️ Get Latest Heatmap</button>
+
+    <div class="stats">
+      <p><strong>Live Person Count:</strong> <span id="live-count">-</span></p>
+      <p><strong>Cumulative Person Count:</strong> <span id="cumulative-count">-</span></p>
+      <p><strong>Alert Status:</strong> <span id="alert-status" class="normal">Normal</span></p>
+    </div>
+
+    <!-- ✅ Single Live Stream -->
+    <img class="live-stream" id="live-stream" src="/video_feed" alt="Live Stream" />
+
+    <!-- Latest static heatmap if requested -->
+    <img id="heatmap-img" src="" alt="Latest Heatmap" style="max-width:100%;" />
   </div>
 
-  <div class="card">
-    <h2>👥 Live Person Count</h2>
-    <button onclick="fetchPersonCount()">Get Live Count</button>
-    <p id="personCount"></p>
-  </div>
-
-  <div class="card">
-    <h2>📊 Cumulative Person Count</h2>
-    <button onclick="fetchCumulativeCount()">Get Cumulative Count</button>
-    <p id="cumulativeCount"></p>
-  </div>
-
-  <div class="card">
-    <h2>⚠ Alert Status</h2>
-    <button onclick="fetchAlertStatus()">Check Alert</button>
-    <p id="alertStatus"></p>
-  </div>
-
-  <div class="card">
-    <h2>🖼 View Current Heatmap</h2>
-    <button onclick="fetchHeatmap()">Get Heatmap</button>
-    <br />
-    <img id="heatmapImg" />
-  </div>
-
-  <div class="card">
-    <h2>📆 Heatmap Report by Time</h2>
-    <label>Start Time:</label>
-    <input type="datetime-local" id="startTime" />
-    <br /><br />
-    <label>End Time:</label>
-    <input type="datetime-local" id="endTime" />
-    <br /><br />
-    <button onclick="fetchHeatmapReport()">Generate Report</button>
-    <br />
-    <img id="reportImg" />
+  <div class="section">
+    <h2>📊 Historical Heatmap Reports</h2>
+    <button class="btn" onclick="generateReport('today')">Today</button>
+    <button class="btn" onclick="generateReport('yesterday')">Yesterday</button>
+    <button class="btn" onclick="generateReport('weekly')">Last 7 Days</button>
+    <button class="btn" onclick="generateReport('monthly')">Last 30 Days</button>
+    <img id="report-img" src="" alt="Historical Heatmap Report" style="max-width:100%;" />
   </div>
 
   <script>
     function startDetection() {
-      fetch("/start")
+      fetch('/start')
         .then(res => res.json())
         .then(data => {
-          document.getElementById("startStatus").innerText = data.message || data.status;
+          alert(data.message || "Detection started");
         });
     }
 
-    function fetchPersonCount() {
-      fetch("/person_count")
-        .then(res => res.json())
-        .then(data => {
-          document.getElementById("personCount").innerText = `⏱ ${data.timestamp || 'N/A'} - Count: ${data.person_count || 0}`;
-        });
-    }
-
-    function fetchCumulativeCount() {
-      fetch("/cumulative_count")
-        .then(res => res.json())
-        .then(data => {
-          document.getElementById("cumulativeCount").innerText = `Total: ${data.cumulative_person_count || 0}, Entries: ${data.entries_considered || 0}`;
-        });
-    }
-
-    function fetchAlertStatus() {
-      fetch("/alert_status")
-        .then(res => res.json())
-        .then(data => {
-          document.getElementById("alertStatus").innerText = data.alert ? "🚨 ALERT Triggered!" : "✅ No Alert";
-        });
-    }
-
-    function fetchHeatmap() {
-      fetch("/heatmap")
-        .then(res => res.json())
-        .then(data => {
-          document.getElementById("heatmapImg").src = `data:image/png;base64,${data.heatmap_base64}`;
-        });
-    }
-
-    function fetchHeatmapReport() {
-      const start = document.getElementById("startTime").value.replace("T", " ");
-      const end = document.getElementById("endTime").value.replace("T", " ");
-      fetch(`/heatmap_report?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`)
+    function loadHeatmap() {
+      fetch('/heatmap')
         .then(res => res.json())
         .then(data => {
           if (data.heatmap_base64) {
-            document.getElementById("reportImg").src = `data:image/png;base64,${data.heatmap_base64}`;
+            document.getElementById("heatmap-img").src = 'data:image/png;base64,' + data.heatmap_base64;
           } else {
-            alert("No heatmap generated. Check the time range.");
+            alert("Heatmap not available yet.");
           }
         });
     }
+
+    function generateReport(period) {
+      fetch(`/heatmap_report?period=${period}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.heatmap_base64) {
+            document.getElementById("report-img").src = 'data:image/png;base64,' + data.heatmap_base64;
+          } else {
+            alert("No data available for this period.");
+          }
+        });
+    }
+
+    function updateLiveStats() {
+      fetch('/person_count')
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById("live-count").textContent = data.person_count ?? "-";
+        });
+
+      fetch('/cumulative_count')
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById("cumulative-count").textContent = data.cumulative_person_count ?? "-";
+        });
+
+      fetch('/alert_status')
+        .then(res => res.json())
+        .then(data => {
+          const alertEl = document.getElementById("alert-status");
+          if (data.alert === true) {
+            alertEl.textContent = "🚨 ALERT";
+            alertEl.className = "alert";
+          } else {
+            alertEl.textContent = "Normal";
+            alertEl.className = "normal";
+          }
+        });
+    }
+
+    setInterval(updateLiveStats, 2000);
+    updateLiveStats();
   </script>
+
 </body>
 </html>
