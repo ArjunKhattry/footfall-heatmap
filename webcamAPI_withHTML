@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, send_file, request,render_template
+from flask import Flask, jsonify, send_file, request, render_template, Response
 from threading import Thread
 import os
 import json
@@ -6,7 +6,7 @@ import HeatMap
 import base64
 import cv2
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 detection_running = False
@@ -14,7 +14,6 @@ detection_running = False
 @app.route('/ui')
 def frontend():
     return render_template("index.html")
-
 
 @app.route('/')
 def home():
@@ -27,12 +26,16 @@ def start_detection():
         return jsonify({"status": "already running"})
 
     detection_running = True
-    t = Thread(target=HeatMap.run_heatmap_detection)
+    t = Thread(target=HeatMap.generate_processed_frames)
     t.daemon = True
     t.start()
     return jsonify({"status": "started", "message": "Heatmap detection is running in background."})
 
-@app.route('/heatmap', methods=['GET'])
+@app.route('/video_feed')
+def video_feed():
+    return Response(HeatMap.generate_processed_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/heatmap')
 def get_heatmap():
     heatmap_dir = "heatmaps"
     if not os.path.exists(heatmap_dir):
@@ -48,7 +51,7 @@ def get_heatmap():
 
     return jsonify({"heatmap_base64": encoded_string})
 
-@app.route('/person_count', methods=['GET'])
+@app.route('/person_count')
 def get_person_count():
     filepath = "heatmaps/person_count_log.json"
     if not os.path.exists(filepath):
@@ -59,12 +62,11 @@ def get_person_count():
             data = json.load(f)
         if not data:
             return jsonify({"error": "Log file is empty"}), 404
-        latest_entry = data[-1]
-        return jsonify(latest_entry)
+        return jsonify(data[-1])
     except Exception as e:
-        return jsonify({"error": f"Failed to read log: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/cumulative_count', methods=['GET'])
+@app.route('/cumulative_count')
 def get_cumulative_count():
     filepath = "heatmaps/person_count_log.json"
     if not os.path.exists(filepath):
@@ -74,21 +76,15 @@ def get_cumulative_count():
         with open(filepath, "r") as f:
             data = json.load(f)
 
-        max_count = 0
-        for entry in data:
-            count = entry.get("person_count", 0)
-            if count > max_count:
-                max_count = count
-
+        max_count = max((entry.get("person_count", 0) for entry in data), default=0)
         return jsonify({
             "cumulative_person_count": max_count,
             "entries_considered": len(data)
         })
-
     except Exception as e:
-        return jsonify({"error": f"Failed to compute cumulative count: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/alert_status', methods=['GET'])
+@app.route('/alert_status')
 def get_alert_status():
     try:
         status = HeatMap.alert_triggered
@@ -96,30 +92,29 @@ def get_alert_status():
     except AttributeError:
         return jsonify({"error": "Alert status not available"}), 500
 
-# ✅ NEW: Heatmap Report API
-@app.route('/heatmap_report', methods=['GET'])
+@app.route('/heatmap_report')
 def heatmap_report():
-    start_time_str = request.args.get("start")
-    end_time_str = request.args.get("end")
+    period = request.args.get("period", "daily")
+    now = datetime.now()
+    if period == "today":
+        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "yesterday":
+        start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        now = start_time + timedelta(days=1)
+    elif period == "weekly":
+        start_time = now - timedelta(days=7)
+    elif period == "monthly":
+        start_time = now - timedelta(days=30)
+    else:
+        return jsonify({"error": "Invalid period. Use one of: today, yesterday, weekly, monthly"}), 400
 
-    if not start_time_str or not end_time_str:
-        return jsonify({"error": "Provide start and end timestamps in format YYYY-MM-DD HH:MM:SS"}), 400
-
-    try:
-        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-        end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return jsonify({"error": "Incorrect time format. Use YYYY-MM-DD HH:MM:SS"}), 400
-
-    # Paths
     blob_path = "heatmaps/blob_coordinates.json"
     bg_path = "/home/cbginnovation/Desktop/cam0.png"
-    out_path = "heatmaps/heatmap_report_time_filtered.png"
+    out_path = f"heatmaps/heatmap_report_{period}.png"
 
     if not os.path.exists(blob_path) or not os.path.exists(bg_path):
         return jsonify({"error": "Required files not found"}), 500
 
-    # Load and prepare
     with open(blob_path, "r") as f:
         data = json.load(f)
 
@@ -128,11 +123,10 @@ def heatmap_report():
     h, w = bg.shape[:2]
     heatmap = np.zeros((h, w), dtype=np.float32)
 
-    # Accumulate heat
     for item in data:
         try:
             t = datetime.strptime(item["timestamp"], "%Y-%m-%d %H:%M:%S")
-            if start_time <= t <= end_time:
+            if start_time <= t <= now:
                 x, y = int(item["x"]), int(item["y"])
                 if 0 <= x < w and 0 <= y < h:
                     heatmap[y, x] += 50
@@ -144,9 +138,11 @@ def heatmap_report():
     color_map = cv2.applyColorMap(normalized.astype(np.uint8), cv2.COLORMAP_JET)
     overlay = cv2.addWeighted(bg, 0.6, color_map, 0.4, 0)
 
-    # Save
     cv2.imwrite(out_path, overlay)
-    return send_file(out_path, mimetype='image/png')
+    with open(out_path, "rb") as f:
+        encoded_string = base64.b64encode(f.read()).decode('utf-8')
+
+    return jsonify({"heatmap_base64": encoded_string})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
