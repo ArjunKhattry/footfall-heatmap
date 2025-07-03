@@ -1,3 +1,4 @@
+# --- HeatMap.py ---
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -5,7 +6,7 @@ import os
 from datetime import datetime
 import json
 
-# --- Load Configuration ---
+
 CONFIG_PATH = "alert_config.json"
 if not os.path.exists(CONFIG_PATH):
     default_config = {
@@ -23,30 +24,25 @@ with open(CONFIG_PATH, "r") as f:
 ALERT_THRESHOLD = config["alert_threshold"]
 alert_zones = {int(k): v for k, v in config["alert_zones"].items()}
 
-# --- Configurable Thresholds ---
 HEAT_INCREMENT = 20
 FIXED_SIZE = (640, 480)
 CONFIDENCE_THRESHOLD = 0.4
 DUPLICATE_DISTANCE_THRESHOLD = 80
 MIN_MOVEMENT_THRESHOLD = 45
-BLOB_THRESHOLD_DURATION = 10  # Frames before plotting blob
-BLOB_LOG_DISTANCE_THRESHOLD = 10  # Distance needed to trigger a new log
+BLOB_THRESHOLD_DURATION = 10
+BLOB_LOG_DISTANCE_THRESHOLD = 10
 
-# Load YOLOv8 model
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "yolov8n.pt")
 model = YOLO(MODEL_PATH)
 
-# Load background image
 bg_image_path = "/home/cbginnovation/Desktop/cam0.png"
 if not os.path.exists(bg_image_path):
     print(f"Error: Background image not found at {bg_image_path}")
     exit(1)
 background_image = cv2.imread(bg_image_path)
 background_image = cv2.resize(background_image, FIXED_SIZE)
-frame_width = background_image.shape[1]
 h, w = background_image.shape[:2]
 
-# Globals
 cam = None
 heatmap = np.zeros((h, w), dtype=np.float32)
 persistent_heatmap = np.zeros_like(heatmap)
@@ -56,23 +52,17 @@ last_logged_blob_positions = {}
 previous_logged_count = -1
 alert_triggered = False
 
-# JSON Paths
 os.makedirs("heatmaps", exist_ok=True)
 person_json_path = "heatmaps/person_count_log.json"
 blob_json_path = "heatmaps/blob_coordinates.json"
-
-# Create files if not exist
 for path in [person_json_path, blob_json_path]:
     if not os.path.exists(path):
         with open(path, "w") as f:
             json.dump([], f, indent=4)
 
 def append_json(filepath, data_entry):
-    if os.path.exists(filepath):
-        with open(filepath, "r") as f:
-            data = json.load(f)
-    else:
-        data = []
+    with open(filepath, "r") as f:
+        data = json.load(f)
     data.append(data_entry)
     with open(filepath, "w") as f:
         json.dump(data, f, indent=4)
@@ -102,8 +92,8 @@ def process_frame(frame):
 
             cx = (x1 + x2) // 2
             cy = y2
-            cx = min(max(cx, 0), persistent_heatmap.shape[1] - 1)
-            cy = min(max(cy, 0), persistent_heatmap.shape[0] - 1)
+            cx = min(max(cx, 0), w - 1)
+            cy = min(max(cy, 0), h - 1)
 
             key = (0, idx)
             prev_pos = last_positions.get(key)
@@ -120,7 +110,6 @@ def process_frame(frame):
                 intensity = HEAT_INCREMENT
                 persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + intensity, 255)
 
-                # Only log if moved enough from last logged position
                 last_logged = last_logged_blob_positions.get(key)
                 moved = True if last_logged is None else np.hypot(cx - last_logged[0], cy - last_logged[1]) > BLOB_LOG_DISTANCE_THRESHOLD
 
@@ -148,14 +137,13 @@ def process_frame(frame):
 
     return frame, current_detections, zone_count
 
-def run_heatmap_detection():
+def generate_processed_frames():
     global cam, previous_logged_count, alert_triggered
     cam = cv2.VideoCapture(0)
     if not cam.isOpened():
         print("❌ Webcam not accessible")
         return
 
-    print("✅ Webcam started")
     while True:
         ret, frame = cam.read()
         if not ret:
@@ -177,7 +165,6 @@ def run_heatmap_detection():
             alert_triggered = True
             cv2.putText(overlay, "ALERT: Overcrowding!", (20, 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
-            print("🚨 ALERT: People exceeded limit in marked zone!")
         else:
             alert_triggered = False
 
@@ -188,19 +175,24 @@ def run_heatmap_detection():
             })
             previous_logged_count = total_detected
 
-        cv2.imshow("Live Heatmap - Press 'q' to stop", overlay)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        ret, buffer = cv2.imencode('.jpg', overlay)
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-    cam.release()
-    cv2.destroyAllWindows()
+def generate_transparent_heatmap_overlay(blob_data, shape):
+    heatmap = np.zeros(shape, dtype=np.float32)
+    for item in blob_data:
+        x, y = int(item["x"]), int(item["y"])
+        if 0 <= x < shape[1] and 0 <= y < shape[0]:
+            heatmap[y, x] += 50
 
-    # Save final heatmap
-    timestamp_now = datetime.now().strftime('%Y%m%d_%H%M%S')
-    blurred_final = cv2.GaussianBlur(persistent_heatmap.copy(), (51, 51), 0)
-    normalized_final = cv2.normalize(blurred_final, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    color_map_final = cv2.applyColorMap(normalized_final, cv2.COLORMAP_JET)
-    final_overlay = cv2.addWeighted(background_image, 0.6, color_map_final, 0.4, 0)
-    final_image_path = f"heatmaps/final_heatmap_on_background_{timestamp_now}.png"
-    cv2.imwrite(final_image_path, final_overlay)
-    print(f"\n✅ Final heatmap saved at: {final_image_path}")
+    blurred = cv2.GaussianBlur(heatmap, (51, 51), 0)
+    norm = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
+    color_map = cv2.applyColorMap(norm.astype(np.uint8), cv2.COLORMAP_JET)
+
+    # Make colormap transparent
+    b, g, r = cv2.split(color_map)
+    alpha = np.where(norm > 0, 180, 0).astype(np.uint8)
+    transparent_overlay = cv2.merge((b, g, r, alpha))
+    return transparent_overlay
