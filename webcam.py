@@ -144,5 +144,15 @@ def heatmap_report():
 
     return jsonify({"heatmap_base64": encoded_string})
 
+@app.route('/download_report')
+def download_report():
+    period = request.args.get("period", "today")
+    file_path = f"heatmaps/heatmap_report_{period}.png"
+
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Report not available to download."}), 404
+
+    return send_file(file_path, as_attachment=True)
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
