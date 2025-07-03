@@ -76,10 +76,7 @@
       <p><strong>Alert Status:</strong> <span id="alert-status" class="normal">Normal</span></p>
     </div>
 
-    <!-- ✅ Single Live Stream -->
     <img class="live-stream" id="live-stream" src="/video_feed" alt="Live Stream" />
-
-    <!-- Latest static heatmap if requested -->
     <img id="heatmap-img" src="" alt="Latest Heatmap" style="max-width:100%;" />
   </div>
 
@@ -89,10 +86,13 @@
     <button class="btn" onclick="generateReport('yesterday')">Yesterday</button>
     <button class="btn" onclick="generateReport('weekly')">Last 7 Days</button>
     <button class="btn" onclick="generateReport('monthly')">Last 30 Days</button>
+    <button class="btn" onclick="downloadReport()">⬇️ Download Report</button>
     <img id="report-img" src="" alt="Historical Heatmap Report" style="max-width:100%;" />
   </div>
 
   <script>
+    let lastPeriod = "today";
+
     function startDetection() {
       fetch('/start')
         .then(res => res.json())
@@ -114,6 +114,7 @@
     }
 
     function generateReport(period) {
+      lastPeriod = period;
       fetch(`/heatmap_report?period=${period}`)
         .then(res => res.json())
         .then(data => {
@@ -123,6 +124,19 @@
             alert("No data available for this period.");
           }
         });
+    }
+
+    function downloadReport() {
+      if (!lastPeriod) {
+        alert("Please generate a report before downloading.");
+        return;
+      }
+      const link = document.createElement('a');
+      link.href = `/download_report?period=${lastPeriod}`;
+      link.download = `heatmap_report_${lastPeriod}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
 
     function updateLiveStats() {
