@@ -3,9 +3,8 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
-
 
 CONFIG_PATH = "alert_config.json"
 if not os.path.exists(CONFIG_PATH):
@@ -180,19 +179,46 @@ def generate_processed_frames():
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-def generate_transparent_heatmap_overlay(blob_data, shape):
-    heatmap = np.zeros(shape, dtype=np.float32)
-    for item in blob_data:
+def get_heatmap_report_by_period(period):
+    now = datetime.now()
+    if period == "today":
+        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "yesterday":
+        start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_time = start_time + timedelta(days=1)
+    elif period == "weekly":
+        start_time = now - timedelta(days=7)
+    elif period == "monthly":
+        start_time = now - timedelta(days=30)
+    else:
+        return None
+
+    with open(blob_json_path, 'r') as f:
+        all_data = json.load(f)
+
+    filtered = []
+    for item in all_data:
+        try:
+            t = datetime.strptime(item["timestamp"], "%Y-%m-%d %H:%M:%S")
+            if period == "yesterday":
+                if start_time <= t < end_time:
+                    filtered.append(item)
+            elif t >= start_time:
+                filtered.append(item)
+        except:
+            continue
+
+    heatmap = np.zeros((h, w), dtype=np.float32)
+    for item in filtered:
         x, y = int(item["x"]), int(item["y"])
-        if 0 <= x < shape[1] and 0 <= y < shape[0]:
+        if 0 <= x < w and 0 <= y < h:
             heatmap[y, x] += 50
 
     blurred = cv2.GaussianBlur(heatmap, (51, 51), 0)
     norm = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
-    color_map = cv2.applyColorMap(norm.astype(np.uint8), cv2.COLORMAP_JET)
+    colormap = cv2.applyColorMap(norm.astype(np.uint8), cv2.COLORMAP_JET)
+    overlay = cv2.addWeighted(background_image, 0.6, colormap, 0.4, 0)
 
-    # Make colormap transparent
-    b, g, r = cv2.split(color_map)
-    alpha = np.where(norm > 0, 180, 0).astype(np.uint8)
-    transparent_overlay = cv2.merge((b, g, r, alpha))
-    return transparent_overlay
+    output_path = f"heatmaps/report_{period}.png"
+    cv2.imwrite(output_path, overlay)
+    return output_path
