@@ -1,4 +1,4 @@
-# --- HeatMap.py ---
+# --- Final Updated HeatMap.py ---
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -48,6 +48,7 @@ persistent_heatmap = np.zeros_like(heatmap)
 position_duration = {}
 last_positions = {}
 last_logged_blob_positions = {}
+last_logged_blob_positions["last_logged_time"] = {}
 previous_logged_count = -1
 alert_triggered = False
 
@@ -109,17 +110,28 @@ def process_frame(frame):
                 intensity = HEAT_INCREMENT
                 persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + intensity, 255)
 
-                last_logged = last_logged_blob_positions.get(key)
-                moved = True if last_logged is None else np.hypot(cx - last_logged[0], cy - last_logged[1]) > BLOB_LOG_DISTANCE_THRESHOLD
+                last_logged_pos = last_logged_blob_positions.get(key)
+                last_logged_time = last_logged_blob_positions["last_logged_time"].get(key)
+                current_time = datetime.now()
 
-                if moved:
+                should_log = False
+
+                if last_logged_pos is None:
+                    should_log = True
+                elif np.hypot(cx - last_logged_pos[0], cy - last_logged_pos[1]) > BLOB_LOG_DISTANCE_THRESHOLD:
+                    should_log = True
+                elif last_logged_time is None or (current_time - last_logged_time).total_seconds() > 5:
+                    should_log = True
+
+                if should_log:
                     append_json(blob_json_path, {
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "timestamp": current_time.strftime("%Y-%m-%d %H:%M:%S"),
                         "camera_id": 0,
                         "x": cx,
                         "y": cy
                     })
                     last_logged_blob_positions[key] = (cx, cy)
+                    last_logged_blob_positions["last_logged_time"][key] = current_time
 
             if zone:
                 (xA, yA), (xB, yB) = zone
@@ -140,7 +152,7 @@ def generate_processed_frames():
     global cam, previous_logged_count, alert_triggered
     cam = cv2.VideoCapture(0)
     if not cam.isOpened():
-        print("❌ Webcam not accessible")
+        print("\u274c Webcam not accessible")
         return
 
     while True:
@@ -178,47 +190,3 @@ def generate_processed_frames():
         frame_bytes = buffer.tobytes()
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-def get_heatmap_report_by_period(period):
-    now = datetime.now()
-    if period == "today":
-        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif period == "yesterday":
-        start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_time = start_time + timedelta(days=1)
-    elif period == "weekly":
-        start_time = now - timedelta(days=7)
-    elif period == "monthly":
-        start_time = now - timedelta(days=30)
-    else:
-        return None
-
-    with open(blob_json_path, 'r') as f:
-        all_data = json.load(f)
-
-    filtered = []
-    for item in all_data:
-        try:
-            t = datetime.strptime(item["timestamp"], "%Y-%m-%d %H:%M:%S")
-            if period == "yesterday":
-                if start_time <= t < end_time:
-                    filtered.append(item)
-            elif t >= start_time:
-                filtered.append(item)
-        except:
-            continue
-
-    heatmap = np.zeros((h, w), dtype=np.float32)
-    for item in filtered:
-        x, y = int(item["x"]), int(item["y"])
-        if 0 <= x < w and 0 <= y < h:
-            heatmap[y, x] += 50
-
-    blurred = cv2.GaussianBlur(heatmap, (51, 51), 0)
-    norm = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
-    colormap = cv2.applyColorMap(norm.astype(np.uint8), cv2.COLORMAP_JET)
-    overlay = cv2.addWeighted(background_image, 0.6, colormap, 0.4, 0)
-
-    output_path = f"heatmaps/report_{period}.png"
-    cv2.imwrite(output_path, overlay)
-    return output_path
