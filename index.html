@@ -59,6 +59,17 @@
       color: green;
       font-weight: bold;
     }
+
+    #status-indicator {
+      font-size: 14px;
+      margin-left: 10px;
+    }
+
+    .report-info {
+      font-size: 14px;
+      color: #666;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
@@ -69,6 +80,7 @@
     <h2>Live Monitoring</h2>
     <button class="btn" onclick="startDetection()">▶️ Start Detection</button>
     <button class="btn" onclick="loadHeatmap()">🖼️ Get Latest Heatmap</button>
+    <span id="status-indicator"></span>
 
     <div class="stats">
       <p><strong>Live Person Count:</strong> <span id="live-count">-</span></p>
@@ -82,6 +94,7 @@
 
   <div class="section">
     <h2>📊 Historical Heatmap Reports</h2>
+    <p class="report-info">These reports include real-time data being continuously logged during detection.</p>
     <button class="btn" onclick="generateReport('today')">Today</button>
     <button class="btn" onclick="generateReport('yesterday')">Yesterday</button>
     <button class="btn" onclick="generateReport('weekly')">Last 7 Days</button>
@@ -98,6 +111,7 @@
         .then(res => res.json())
         .then(data => {
           alert(data.message || "Detection started");
+          document.getElementById("status-indicator").textContent = "🔄 Live detection running...";
         });
     }
 
