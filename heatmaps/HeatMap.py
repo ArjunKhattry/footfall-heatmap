@@ -1,10 +1,10 @@
-# --- Final Updated HeatMap.py ---
 import cv2
 import numpy as np
 from ultralytics import YOLO
 import os
 from datetime import datetime, timedelta
 import json
+from PIL import Image, ImageDraw
 
 CONFIG_PATH = "alert_config.json"
 if not os.path.exists(CONFIG_PATH):
@@ -190,3 +190,49 @@ def generate_processed_frames():
         frame_bytes = buffer.tobytes()
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+def generate_transparent_heatmap_report(period="today"):
+    blob_path = "heatmaps/blob_coordinates.json"
+    output_path = f"heatmaps/transparent_heatmap_report_{period}.png"
+    now = datetime.now()
+
+    if period == "today":
+        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "yesterday":
+        start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        now = start_time + timedelta(days=1)
+    elif period == "weekly":
+        start_time = now - timedelta(days=7)
+    elif period == "monthly":
+        start_time = now - timedelta(days=30)
+    else:
+        return None
+
+    with open(blob_path, "r") as f:
+        blob_data = json.load(f)
+
+    transparent = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(transparent, 'RGBA')
+
+    heat_counter = {}
+    for item in blob_data:
+        try:
+            timestamp = datetime.strptime(item["timestamp"], "%Y-%m-%d %H:%M:%S")
+            if start_time <= timestamp <= now:
+                x, y = int(item["x"]), int(item["y"])
+                key = (x, y)
+                heat_counter[key] = heat_counter.get(key, 0) + 1
+        except:
+            continue
+
+    for (x, y), count in heat_counter.items():
+        r = 25
+        alpha = min(40 + count * 12, 255)
+        for i in range(5):
+            draw.ellipse(
+                [(x - r + i, y - r + i), (x + r - i, y + r - i)],
+                fill=(255, 0, 0, alpha)
+            )
+
+    transparent.save(output_path)
+    return output_path
