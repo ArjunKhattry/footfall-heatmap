@@ -4,8 +4,6 @@ import os
 import json
 import HeatMap
 import base64
-import cv2
-import numpy as np
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -95,54 +93,13 @@ def get_alert_status():
 @app.route('/heatmap_report')
 def heatmap_report():
     period = request.args.get("period", "daily")
-    now = datetime.now()
-    if period == "today":
-        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif period == "yesterday":
-        start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        now = start_time + timedelta(days=1)
-    elif period == "weekly":
-        start_time = now - timedelta(days=7)
-    elif period == "monthly":
-        start_time = now - timedelta(days=30)
-    else:
-        return jsonify({"error": "Invalid period. Use one of: today, yesterday, weekly, monthly"}), 400
-
-    blob_path = "heatmaps/blob_coordinates.json"
-    bg_path = "/home/cbginnovation/Desktop/cam0.png"
-    out_path = f"heatmaps/heatmap_report_{period}.png"
-
-    if not os.path.exists(blob_path) or not os.path.exists(bg_path):
-        return jsonify({"error": "Required files not found"}), 500
-
-    with open(blob_path, "r") as f:
-        data = json.load(f)
-
-    bg = cv2.imread(bg_path)
-    bg = cv2.resize(bg, (640, 480))
-    h, w = bg.shape[:2]
-    heatmap = np.zeros((h, w), dtype=np.float32)
-
-    for item in data:
-        try:
-            t = datetime.strptime(item["timestamp"], "%Y-%m-%d %H:%M:%S")
-            if start_time <= t <= now:
-                x, y = int(item["x"]), int(item["y"])
-                if 0 <= x < w and 0 <= y < h:
-                    heatmap[y, x] += 50
-        except:
-            continue
-
-    blurred = cv2.GaussianBlur(heatmap, (51, 51), 0)
-    normalized = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
-    color_map = cv2.applyColorMap(normalized.astype(np.uint8), cv2.COLORMAP_JET)
-    overlay = cv2.addWeighted(bg, 0.6, color_map, 0.4, 0)
-
-    cv2.imwrite(out_path, overlay)
-    with open(out_path, "rb") as f:
-        encoded_string = base64.b64encode(f.read()).decode('utf-8')
-
-    return jsonify({"heatmap_base64": encoded_string})
+    try:
+        out_path = HeatMap.generate_transparent_heatmap_report(period)
+        with open(out_path, "rb") as f:
+            encoded_string = base64.b64encode(f.read()).decode('utf-8')
+        return jsonify({"heatmap_base64": encoded_string})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/download_report')
 def download_report():
@@ -153,7 +110,6 @@ def download_report():
         return jsonify({"error": "Report not available to download."}), 404
 
     return send_file(file_path, as_attachment=True)
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
