@@ -54,7 +54,7 @@ alert_triggered = False
 
 os.makedirs("heatmaps", exist_ok=True)
 person_json_path = "heatmaps/person_count_log.json"
-blob_json_path = "heatmaps/blob_coordinates.json"
+blob_json_path = "heatmaps/heatmap_log.json"
 for path in [person_json_path, blob_json_path]:
     if not os.path.exists(path):
         with open(path, "w") as f:
@@ -192,8 +192,10 @@ def generate_processed_frames():
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
 def generate_transparent_heatmap_report(period="today"):
-    blob_path = "heatmaps/blob_coordinates.json"
-    output_path = f"heatmaps/transparent_heatmap_report_{period}.png"
+    from PIL import Image
+
+    blob_path = "heatmaps/heatmap_log.json"
+    output_path = f"heatmaps/heatmap_report_{period}.png"
     now = datetime.now()
 
     if period == "today":
@@ -211,28 +213,79 @@ def generate_transparent_heatmap_report(period="today"):
     with open(blob_path, "r") as f:
         blob_data = json.load(f)
 
-    transparent = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(transparent, 'RGBA')
+    # Create a blank heatmap (grayscale accumulation)
+    heatmap_data = np.zeros((h, w), dtype=np.float32)
 
-    heat_counter = {}
     for item in blob_data:
         try:
             timestamp = datetime.strptime(item["timestamp"], "%Y-%m-%d %H:%M:%S")
             if start_time <= timestamp <= now:
                 x, y = int(item["x"]), int(item["y"])
-                key = (x, y)
-                heat_counter[key] = heat_counter.get(key, 0) + 1
+                if 0 <= x < w and 0 <= y < h:
+                    heatmap_data[y, x] += HEAT_INCREMENT
         except:
             continue
 
-    for (x, y), count in heat_counter.items():
-        r = 25
-        alpha = min(40 + count * 12, 255)
-        for i in range(5):
-            draw.ellipse(
-                [(x - r + i, y - r + i), (x + r - i, y + r - i)],
-                fill=(255, 0, 0, alpha)
-            )
+    # Apply blur and normalize
+    blurred = cv2.GaussianBlur(heatmap_data, (51, 51), 0)
+    norm = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
+    color_map = cv2.applyColorMap(norm.astype(np.uint8), cv2.COLORMAP_JET)
 
-    transparent.save(output_path)
+    # Convert to transparent image (preserve only color + alpha based on intensity)
+    heatmap_rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    for y in range(h):
+        for x in range(w):
+            r, g, b = color_map[y, x]
+            alpha = norm[y, x] if norm[y, x] > 0 else 0
+            heatmap_rgba[y, x] = [r, g, b, alpha]
+
+    # Convert to Pillow Image and save
+    final_img = Image.fromarray(heatmap_rgba, mode="RGBA")
+    final_img.save(output_path)
     return output_path
+
+def generate_heatmap_on_background(period="today"):
+    blob_path = "heatmaps/heatmap_log.json"
+    output_path = f"heatmaps/heatmap_report_{period}.png"
+    now = datetime.now()
+
+    if period == "today":
+        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "yesterday":
+        start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        now = start_time + timedelta(days=1)
+    elif period == "weekly":
+        start_time = now - timedelta(days=7)
+    elif period == "monthly":
+        start_time = now - timedelta(days=30)
+    else:
+        return None
+
+    with open(blob_path, "r") as f:
+        blob_data = json.load(f)
+
+    heatmap_data = np.zeros((h, w), dtype=np.float32)
+
+    for item in blob_data:
+        try:
+            timestamp = datetime.strptime(item["timestamp"], "%Y-%m-%d %H:%M:%S")
+            if start_time <= timestamp <= now:
+                x, y = int(item["x"]), int(item["y"])
+                if 0 <= x < w and 0 <= y < h:
+                    heatmap_data[y, x] += HEAT_INCREMENT
+        except:
+            continue
+
+    # Apply OpenCV heatmap logic
+    blurred = cv2.GaussianBlur(heatmap_data, (51, 51), 0)
+    norm = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX)
+    color_map = cv2.applyColorMap(norm.astype(np.uint8), cv2.COLORMAP_JET)
+
+    # Overlay on background image
+    bg_copy = background_image.copy()
+    overlay = cv2.addWeighted(bg_copy, 0.6, color_map, 0.4, 0)
+
+    # Save final report
+    cv2.imwrite(output_path, overlay)
+    return output_path
+
