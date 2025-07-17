@@ -8,11 +8,9 @@
       padding: 30px;
       background-color: #f0f0f0;
     }
-
     h1, h2 {
       color: #333;
     }
-
     .btn {
       padding: 10px 20px;
       margin: 10px 5px;
@@ -22,26 +20,20 @@
       border-radius: 5px;
       cursor: pointer;
     }
-
     .btn:hover {
       background-color: #2980b9;
     }
-
     .stats {
       font-size: 18px;
       margin-top: 10px;
     }
-
     img {
       margin-top: 20px;
       border: 2px solid #ccc;
     }
-
     .live-stream {
-      width: 480px;
-      height: auto;
-    }
 
+    }
     .section {
       margin-bottom: 50px;
       background-color: #fff;
@@ -49,36 +41,35 @@
       border-radius: 10px;
       box-shadow: 0px 2px 5px rgba(0,0,0,0.1);
     }
-
     .alert {
       color: red;
       font-weight: bold;
     }
-
     .normal {
       color: green;
       font-weight: bold;
     }
-
     #status-indicator {
       font-size: 14px;
       margin-left: 10px;
     }
-
     .report-info {
       font-size: 14px;
       color: #666;
       margin-top: 8px;
     }
-
     #report-img, #heatmap-img {
       max-width: 100%;
       background: transparent;
     }
+    input[type='number'], input[type='text'] {
+      padding: 5px;
+      margin: 5px;
+      width: 80px;
+    }
   </style>
 </head>
 <body>
-
   <h1>👣 Footfall Heatmap Dashboard</h1>
 
   <div class="section">
@@ -106,6 +97,21 @@
     <button class="btn" onclick="generateReport('monthly')">Last 30 Days</button>
     <button class="btn" onclick="downloadReport()">⬇️ Download Report</button>
     <img id="report-img" src="" alt="Historical Heatmap Report" />
+  </div>
+
+  <div class="section">
+    <h2>⚠️ Alert Configuration</h2>
+    <form onsubmit="updateAlertConfig(event)">
+      <label><strong>Zone X1, Y1:</strong></label>
+      <input type="number" id="x1" required>
+      <input type="number" id="y1" required><br>
+      <label><strong>Zone X2, Y2:</strong></label>
+      <input type="number" id="x2" required>
+      <input type="number" id="y2" required><br>
+      <label><strong>Threshold:</strong></label>
+      <input type="number" id="threshold" value="1" required><br>
+      <button class="btn" type="submit">🛠️ Update Alert Config</button>
+    </form>
   </div>
 
   <script>
@@ -185,9 +191,36 @@
         });
     }
 
+    function updateAlertConfig(event) {
+      event.preventDefault();
+      const x1 = parseInt(document.getElementById('x1').value);
+      const y1 = parseInt(document.getElementById('y1').value);
+      const x2 = parseInt(document.getElementById('x2').value);
+      const y2 = parseInt(document.getElementById('y2').value);
+      const threshold = parseInt(document.getElementById('threshold').value);
+
+      const payload = {
+        alert_threshold: threshold,
+        alert_zones: {
+          "0": [[x1, y1], [x2, y2]]
+        }
+      };
+
+      fetch('/update_alert_config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      })
+        .then(res => res.json())
+        .then(data => {
+          alert(data.message || "Configuration updated.");
+        });
+    }
+
     setInterval(updateLiveStats, 2000);
     updateLiveStats();
   </script>
-
 </body>
 </html>
