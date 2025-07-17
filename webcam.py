@@ -161,6 +161,16 @@ def max_count_by_30min():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+@app.route('/today_max_count_array')
+def today_max_count_array():
+    try:
+        counts = HeatMap.get_today_max_person_count_by_30min()
+        return jsonify(counts)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
