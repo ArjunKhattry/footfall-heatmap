@@ -81,6 +81,30 @@ def save_blob_log():
         with open(blob_json_path, "w") as f:
             json.dump(existing, f, indent=4)
         temp_blob_log.clear()
+        
+def get_today_max_person_count_by_30min():
+    with open(person_json_path, "r") as f:
+        data = json.load(f)
+
+    today = datetime.now().date()
+    interval_max_counts = {}
+
+    for entry in data:
+        try:
+            timestamp = datetime.strptime(entry["timestamp"], "%Y-%m-%d %H:%M:%S")
+            if timestamp.date() != today:
+                continue
+
+            interval_start = timestamp.replace(minute=(timestamp.minute // 30) * 30, second=0, microsecond=0)
+            interval_key = interval_start.strftime("%Y-%m-%d %H:%M:%S")
+
+            if interval_key not in interval_max_counts or entry["person_count"] > interval_max_counts[interval_key]:
+                interval_max_counts[interval_key] = entry["person_count"]
+        except:
+            continue
+
+    return list(interval_max_counts.values())
+
 
 def get_max_person_count_by_30min():
     with open(person_json_path, "r") as f:
