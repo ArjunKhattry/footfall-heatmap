@@ -112,6 +112,55 @@ def download_report():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/update_alert_config', methods=['POST'])
+def update_alert_config():
+    try:
+        data = request.get_json()
+        new_config = {
+            "alert_threshold": data.get("alert_threshold", 1),
+            "alert_zones": data.get("alert_zones", {"0": [[200, 140], [280, 260]]})
+        }
+        with open("alert_config.json", "w") as f:
+            json.dump(new_config, f, indent=4)
+        return jsonify({"message": "Alert configuration updated successfully."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/max_count_by_30min')
+def max_count_by_30min():
+    filepath = "heatmaps/person_count_log.json"
+    if not os.path.exists(filepath):
+        return jsonify({"error": "person_count_log.json not found"}), 404
+
+    try:
+        with open(filepath, "r") as f:
+            logs = json.load(f)
+
+        interval_counts = {}
+
+        for entry in logs:
+            timestamp_str = entry.get("timestamp")
+            count = entry.get("person_count", 0)
+
+            try:
+                timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                continue
+
+            # Round timestamp to nearest 30-min block
+            rounded = timestamp.replace(minute=(timestamp.minute // 30) * 30, second=0, microsecond=0)
+            key = rounded.strftime("%Y-%m-%d %H:%M")
+
+            if key not in interval_counts or count > interval_counts[key]:
+                interval_counts[key] = count
+
+        sorted_result = [{"interval_start": k, "max_person_count": v}
+                         for k, v in sorted(interval_counts.items())]
+
+        return jsonify(sorted_result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
