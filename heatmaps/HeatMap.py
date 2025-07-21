@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import json
 from PIL import Image
 import atexit
+from collections import defaultdict
 
 CONFIG_PATH = "alert_config.json"
 if not os.path.exists(CONFIG_PATH):
@@ -18,11 +19,11 @@ if not os.path.exists(CONFIG_PATH):
     with open(CONFIG_PATH, "w") as f:
         json.dump(default_config, f, indent=4)
 
-HEAT_INCREMENT = 20
+HEAT_INCREMENT = 40
 FIXED_SIZE = (640, 480)
 CONFIDENCE_THRESHOLD = 0.4
 DUPLICATE_DISTANCE_THRESHOLD = 80
-MIN_MOVEMENT_THRESHOLD = 45
+MIN_MOVEMENT_THRESHOLD = 60
 BLOB_LOG_DISTANCE_THRESHOLD = 10
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "yolov8n.pt")
@@ -87,23 +88,27 @@ def get_today_max_person_count_by_30min():
         data = json.load(f)
 
     today = datetime.now().date()
-    interval_max_counts = {}
+    interval_counts = defaultdict(int)
 
+    # Filter only today's data between 9:00 and 21:00
     for entry in data:
         try:
             timestamp = datetime.strptime(entry["timestamp"], "%Y-%m-%d %H:%M:%S")
-            if timestamp.date() != today:
-                continue
-
-            interval_start = timestamp.replace(minute=(timestamp.minute // 30) * 30, second=0, microsecond=0)
-            interval_key = interval_start.strftime("%Y-%m-%d %H:%M:%S")
-
-            if interval_key not in interval_max_counts or entry["person_count"] > interval_max_counts[interval_key]:
-                interval_max_counts[interval_key] = entry["person_count"]
+            if timestamp.date() == today and 9 <= timestamp.hour < 21:
+                rounded = timestamp.replace(minute=(timestamp.minute // 30) * 30, second=0, microsecond=0)
+                interval_counts[rounded] = max(interval_counts[rounded], entry["person_count"])
         except:
             continue
 
-    return list(interval_max_counts.values())
+    # Fill all intervals from 9:00 to 21:00 with default 0
+    intervals = []
+    start_time = datetime.combine(today, datetime.min.time()).replace(hour=9)
+    for i in range(24):  # 12 hours * 2 (30 min blocks)
+        slot = start_time + timedelta(minutes=30 * i)
+        intervals.append(interval_counts.get(slot, 0))
+
+    return intervals
+
 
 
 def get_max_person_count_by_30min():
