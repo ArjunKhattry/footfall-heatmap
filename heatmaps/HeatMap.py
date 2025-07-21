@@ -159,9 +159,15 @@ def process_frame(frame):
             dist = np.hypot(cx - prev_pos[0], cy - prev_pos[1]) if prev_pos else float('inf')
 
             if prev_pos is None or dist >= MIN_MOVEMENT_THRESHOLD:
-                position_duration[key] = 1
+                position_duration[key] = 0
                 last_seen_time[key] = current_time
+            else:
+                elapsed = (current_time - last_seen_time.get(key, current_time)).total_seconds()
+                position_duration[key] = int(elapsed)
 
+            new_last_positions[key] = (cx, cy)
+
+            if prev_pos is None or np.hypot(cx - prev_pos[0], cy - prev_pos[1]) >= BLOB_LOG_DISTANCE_THRESHOLD:
                 intensity = HEAT_INCREMENT
                 persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + intensity, 255)
                 temp_blob_log.append({
@@ -170,11 +176,6 @@ def process_frame(frame):
                     "x": cx,
                     "y": cy
                 })
-            else:
-                elapsed = (current_time - last_seen_time.get(key, current_time)).total_seconds()
-                position_duration[key] = int(elapsed)
-
-            new_last_positions[key] = (cx, cy)
 
             if zone:
                 (xA, yA), (xB, yB) = zone
@@ -203,7 +204,6 @@ def process_frame(frame):
         cv2.rectangle(frame, (xA, yA), (xB, yB), (0, 0, 255), 2)
 
     return frame, current_detections, zone_count
-
 
 def generate_processed_frames():
     global cam, previous_logged_count, alert_triggered
