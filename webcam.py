@@ -165,8 +165,32 @@ def max_count_by_30min():
 @app.route('/today_max_count_array')
 def today_max_count_array():
     try:
-        counts = HeatMap.get_today_max_person_count_by_30min()
-        return jsonify(counts)
+        filepath = "heatmaps/person_count_log.json"
+        if not os.path.exists(filepath):
+            return jsonify({"error": "person_count_log.json not found"}), 404
+
+        with open(filepath, "r") as f:
+            data = json.load(f)
+
+        today = datetime.now().date()
+        start_time = datetime.combine(today, datetime.min.time()).replace(hour=9)
+        end_time = start_time.replace(hour=21)
+
+        # Prepare all 30-min slots
+        intervals = [(start_time + timedelta(minutes=30*i)).strftime("%H:%M") for i in range(24)]
+        interval_counts = {key: 0 for key in intervals}
+
+        for entry in data:
+            try:
+                ts = datetime.strptime(entry["timestamp"], "%Y-%m-%d %H:%M:%S")
+                if ts.date() == today and start_time <= ts <= end_time:
+                    rounded = ts.replace(minute=(ts.minute // 30) * 30, second=0, microsecond=0)
+                    key = rounded.strftime("%H:%M")
+                    interval_counts[key] = max(interval_counts[key], entry.get("person_count", 0))
+            except:
+                continue
+
+        return jsonify([interval_counts[slot] for slot in intervals])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
