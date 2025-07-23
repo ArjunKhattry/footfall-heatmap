@@ -133,18 +133,17 @@ def get_max_person_count_by_30min():
 atexit.register(save_blob_log)
 
 def process_frame(frame):
-    global last_positions, last_logged_blob_positions, ALERT_THRESHOLD, zone, CONFIG_STATUS
+    global last_positions, position_duration, last_seen_time
+    ALERT_THRESHOLD, alert_zones = load_alert_config()
+
     frame = cv2.resize(frame, FIXED_SIZE)
-    output = frame.copy()
     results = model(frame, verbose=False)[0]
     current_detections = []
     zone_count = 0
     current_time = datetime.now()
-    new_last_positions = {}
 
-    if CONFIG_STATUS == 1:
-        ALERT_THRESHOLD, zone = load_alert_config()
-        CONFIG_STATUS = 0
+    zone = alert_zones.get(0)
+    new_last_positions = {}
 
     for idx, box in enumerate(results.boxes):
         cls_id = int(box.cls[0])
@@ -159,51 +158,46 @@ def process_frame(frame):
             cx = min(max(cx, 0), w - 1)
             cy = min(max(cy, 0), h - 1)
 
-            # Existing: key = (0, idx)
             key = (0, idx)
             prev_pos = last_positions.get(key)
-            current_pos = (cx, cy)
-
-# Calculate movement distance
-            moved_distance = np.hypot(cx - prev_pos[0], cy - prev_pos[1]) if prev_pos else float('inf')
-
-# Always update last seen time
-            last_seen_time[key] = current_time
-
-# Increment heatmap at new location if moved enough
-            if prev_pos is None or moved_distance >= STEP_DISTANCE:
-    # Start a new heatmap blob
-               position_duration[key] = 1  # Reset duration
-               persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + HEAT_INCREMENT, 255)
-               temp_blob_log.append({
-                 "timestamp": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-                 "camera_id": 0,
-                 "x": cx,
-                 "y": cy
-                 })
+            
+            if prev_pos:
+                dist = np.hypot(cx - prev_pos[0], cy - prev_pos[1])
+            
             else:
-    # If not moved enough, increase intensity gradually
-             position_duration[key] += 1
-            if position_duration[key] % 10 == 0:  # Every ~10 frames
-               persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + 10, 255)
-               temp_blob_log.append({
-            "timestamp": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "camera_id": 0,
-            "x": cx,
-            "y": cy
-        })
+                 float('inf')
 
+            elapsed = (current_time - last_seen_time.get(key, current_time)).total_seconds()
+            
+            if prev_pos is None or dist >= MIN_MOVEMENT_THRESHOLD:
+                position_duration[key] = 1
+                last_seen_time[key] = current_time
             else:
-                elapsed = (current_time - last_seen_time.get(key, current_time)).total_seconds()
                 position_duration[key] = int(elapsed)
 
             new_last_positions[key] = (cx, cy)
+
+            # Update heatmap on minimal movement
+            if prev_pos is None or dist >= BLOB_LOG_DISTANCE_THRESHOLD:
+                position_duration[key] = 1
+            else:
+                position_duration[key] = position_duration.get(key, 0) + 1
+                
+                last_positions[key]= (cx,cy)
+                persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + HEAT_INCREMENT, 255)
+                temp_blob_log.append({
+                    "timestamp": current_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "camera_id": 0,
+                    "x": cx,
+                    "y": cy
+                })
+            
 
             if zone:
                 (xA, yA), (xB, yB) = zone
                 if xA <= cx <= xB and yA <= cy <= yB:
                     zone_count += 1
-            
+
             current_detections.append((cx, cy))
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.circle(frame, (cx, cy), 4, (0, 0, 255), -1)
@@ -216,13 +210,11 @@ def process_frame(frame):
             else:
                 timer_color = (0, 0, 255)
 
-            ##### corner
-            cv2.rectangle(frame, (x1, y2-36), (x1+120, y2-2), (80,80,80), -1)
+            cv2.putText(frame, f"{duration}s", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, timer_color, 2)
 
-            ##### putText
-            cv2.putText(frame, f" Idle {duration}s", (x1, y2-10), cv2.FONT_HERSHEY_DUPLEX, 0.7, timer_color, 2)
-    
     last_positions = new_last_positions
+
     if zone:
         (xA, yA), (xB, yB) = zone
         cv2.rectangle(frame, (xA, yA), (xB, yB), (0, 0, 255), 2)
