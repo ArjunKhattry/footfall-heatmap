@@ -8,19 +8,21 @@ import atexit
 from PIL import Image, ImageDraw
 from collections import defaultdict
 
-CONFIG_PATH = "engine/alert_config.json"
+CONFIG_PATH = "alert_config.json"
 CONFIG_STATUS = 0
-HEAT_INCREMENT = 40
+HEAT_INCREMENT = 50
 FIXED_SIZE = (1032, 616)
 CONFIDENCE_THRESHOLD = 0.4
 DUPLICATE_DISTANCE_THRESHOLD = 80
 MIN_MOVEMENT_THRESHOLD = 60
 BLOB_THRESHOLD_DURATION = 10
-BLOB_LOG_DISTANCE_THRESHOLD = 10
+BLOB_LOG_DISTANCE_THRESHOLD = 20
+STEP_DISTANCE = 20  # Movement threshold to start new blob
+
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "yolov8n.pt")
 
 model = YOLO(MODEL_PATH)
-bg_image_path = "background.jpg"
+bg_image_path = "/home/cbginnovation/Desktop/cam0.png"
 
 if not os.path.exists(bg_image_path):
     print(f"Error: Background image not found at {bg_image_path}")
@@ -43,9 +45,9 @@ alert_zone_person = 0
 last_logged_blob_positions = {}
 last_logged_blob_positions["last_logged_time"] = {}
 
-os.makedirs("database", exist_ok=True)
-person_json_path = "database/person_count_log.json"
-blob_json_path = "database/heatmap_log.json"
+os.makedirs("heatmaps", exist_ok=True)
+person_json_path = "heatmaps/person_count_log.json"
+blob_json_path = "heatmaps/heatmap_log.json"
 for path in [person_json_path, blob_json_path]:
     if not os.path.exists(path):
         with open(path, "w") as f:
@@ -157,22 +159,40 @@ def process_frame(frame):
             cx = min(max(cx, 0), w - 1)
             cy = min(max(cy, 0), h - 1)
 
+            # Existing: key = (0, idx)
             key = (0, idx)
             prev_pos = last_positions.get(key)
-            dist = np.hypot(cx - prev_pos[0], cy - prev_pos[1]) if prev_pos else float('inf')
+            current_pos = (cx, cy)
 
-            if prev_pos is None or dist >= MIN_MOVEMENT_THRESHOLD:
-                position_duration[key] = 1
-                last_seen_time[key] = current_time
+# Calculate movement distance
+            moved_distance = np.hypot(cx - prev_pos[0], cy - prev_pos[1]) if prev_pos else float('inf')
 
-                intensity = HEAT_INCREMENT
-                persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + intensity, 255)
-                temp_blob_log.append({
-                    "timestamp": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "camera_id": 0,
-                    "x": cx,
-                    "y": cy
-                })
+# Always update last seen time
+            last_seen_time[key] = current_time
+
+# Increment heatmap at new location if moved enough
+            if prev_pos is None or moved_distance >= STEP_DISTANCE:
+    # Start a new heatmap blob
+               position_duration[key] = 1  # Reset duration
+               persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + HEAT_INCREMENT, 255)
+               temp_blob_log.append({
+                 "timestamp": current_time.strftime("%Y-%m-%d %H:%M:%S"),
+                 "camera_id": 0,
+                 "x": cx,
+                 "y": cy
+                 })
+            else:
+    # If not moved enough, increase intensity gradually
+             position_duration[key] += 1
+            if position_duration[key] % 10 == 0:  # Every ~10 frames
+               persistent_heatmap[cy, cx] = min(persistent_heatmap[cy, cx] + 10, 255)
+               temp_blob_log.append({
+            "timestamp": current_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "camera_id": 0,
+            "x": cx,
+            "y": cy
+        })
+
             else:
                 elapsed = (current_time - last_seen_time.get(key, current_time)).total_seconds()
                 position_duration[key] = int(elapsed)
