@@ -2,11 +2,16 @@ from flask import Flask, jsonify, send_file, request, render_template, Response
 from threading import Thread
 import os
 import json
-import HeatMap
+from engine import HeatMap
 import base64
+import cv2
+import numpy as np
+from flask_cors import CORS
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
+CORS(app) # Enable CORS for all routes and origins
+
 detection_running = False
 
 @app.route('/ui')
@@ -51,7 +56,7 @@ def get_heatmap():
 
 @app.route('/person_count')
 def get_person_count():
-    filepath = "heatmaps/person_count_log.json"
+    filepath = "database/person_count_log.json"
     if not os.path.exists(filepath):
         return jsonify({"error": "person_count_log.json not found"}), 404
 
@@ -66,7 +71,7 @@ def get_person_count():
 
 @app.route('/cumulative_count')
 def get_cumulative_count():
-    filepath = "heatmaps/person_count_log.json"
+    filepath = "database/person_count_log.json"
     if not os.path.exists(filepath):
         return jsonify({"error": "person_count_log.json not found"}), 404
 
@@ -86,7 +91,7 @@ def get_cumulative_count():
 def get_alert_status():
     try:
         status = HeatMap.alert_triggered
-        return jsonify({"alert": status})
+        return jsonify({"alert": status, "person_count": HeatMap.alert_zone_person})
     except AttributeError:
         return jsonify({"error": "Alert status not available"}), 500
 
@@ -104,24 +109,18 @@ def heatmap_report():
 @app.route('/download_report')
 def download_report():
     period = request.args.get("period", "today")
-    try:
-        file_path = HeatMap.generate_heatmap_on_background(period)
-        if not os.path.exists(file_path):
-            return jsonify({"error": "Report not available to download."}), 404
-        return send_file(file_path, as_attachment=True)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    out_path = HeatMap.generate_heatmap_on_background(period)
+    
+    if not os.path.exists(out_path):
+        return jsonify({"error": "Report not available to download."}), 404
+
+    return send_file(out_path, as_attachment=True)
 
 @app.route('/update_alert_config', methods=['POST'])
 def update_alert_config():
     try:
         data = request.get_json()
-        new_config = {
-            "alert_threshold": data.get("alert_threshold", 1),
-            "alert_zones": data.get("alert_zones", {"0": [[200, 140], [280, 260]]})
-        }
-        with open("alert_config.json", "w") as f:
-            json.dump(new_config, f, indent=4)
+        HeatMap.update_alertconfig(data)
         return jsonify({"message": "Alert configuration updated successfully."})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -161,11 +160,11 @@ def max_count_by_30min():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
+
 @app.route('/today_max_count_array')
 def today_max_count_array():
     try:
-        filepath = "heatmaps/person_count_log.json"
+        filepath = "database/person_count_log.json"
         if not os.path.exists(filepath):
             return jsonify({"error": "person_count_log.json not found"}), 404
 
@@ -193,8 +192,6 @@ def today_max_count_array():
         return jsonify([interval_counts[slot] for slot in intervals])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-    
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
